@@ -1,0 +1,17 @@
+# PlatformIO
+.pio/
+
+# VSCode (auto-generados por PlatformIO)
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+
+# Credenciales y configuración local sensible
+include/secrets.h
+src/secrets.h
+
+# Binarios compilados
+*.bin
+*.elf
+*.map
