@@ -1,6 +1,7 @@
 // Sistema de Alarmas Comunitarias / Botón de Pánico (COMSECA-Ambato)
 // Fase 0: esqueleto arquitectónico (Config, capas en lib/, logger, máquina de estados).
 // Fase 1: botón de pánico por ISR -> cola -> AlarmController; LED de estado; GPIO de disparo.
+// Fase 2: audio por tipo de evento (DFPlayer Mini) inyectado en el controlador.
 //
 // main.cpp es SÓLO composición: crea instancias, las inyecta y lanza las tareas.
 #include <Arduino.h>
@@ -9,13 +10,16 @@
 #include "Events.h"
 #include "Logger.h"
 #include "GpioAlarmOutput.h"
+#include "Mp3Player.h"
 #include "AlarmController.h"
 
-// --- Composición e inyección de dependencias (Fase 0) ---
-static GpioAlarmOutput alarmOutput(Config::PIN_RELAY);   // salida concreta (HAL)
-static AlarmController  controller(alarmOutput);         // recibe IAlarmOutput&
+// --- Composición e inyección de dependencias ---
+static GpioAlarmOutput alarmOutput(Config::PIN_RELAY);                                  // salida concreta (HAL)
+static Mp3Player       audioPlayer(Serial1, Config::PIN_MP3_RX, Config::PIN_MP3_TX,     // DFPlayer en UART1 (9600)
+                                   Config::MP3_BAUD);
+static AlarmController controller(alarmOutput, audioPlayer);                            // recibe interfaces
 
-static QueueHandle_t eventQueue = nullptr;               // bus de eventos del sistema
+static QueueHandle_t eventQueue = nullptr;   // bus de eventos del sistema
 
 // --- ISR del botón de pánico (Fase 1) ---
 // Mínima (criterio "Siempre"): sólo encola el evento, sin Serial/delay/malloc.
@@ -62,9 +66,9 @@ static void TaskStatusLed(void*) {
 }
 
 // --- TaskSerialConsole: inyección manual de eventos para la demo (sin hardware extra) ---
-// p = pánico,  s = silenciar,  a = ack.  Único LECTOR del Serial.
-// Permite demostrar el flujo evento->cola->controlador y el SILENCE aunque aún no
-// existan las fuentes SMS (Fase 4) ni REST (Fase 6).
+// p = pánico (BTN),  m = simula SMS,  r = simula REST,  s = silenciar,  a = ack.
+// 'm' y 'r' permiten oír pistas DISTINTAS y demostrar "audio por tipo" / ">=2 audios"
+// antes de tener las fuentes reales (SMS en Fase 4, REST en Fase 6). Único LECTOR del Serial.
 static void TaskSerialConsole(void*) {
   for (;;) {
     if (Serial.available()) {
@@ -73,6 +77,8 @@ static void TaskSerialConsole(void*) {
       bool valid = true;
       switch (c) {
         case 'p': case 'P': ev = EventType::BTN_PANIC; break;
+        case 'm': case 'M': ev = EventType::SMS_IN;    break;
+        case 'r': case 'R': ev = EventType::REST_IN;   break;
         case 's': case 'S': ev = EventType::SILENCE;   break;
         case 'a': case 'A': ev = EventType::ACK;       break;
         default:            valid = false;             break;
@@ -86,9 +92,12 @@ static void TaskSerialConsole(void*) {
 void setup() {
   Serial.begin(Config::LOG_BAUD);
   delay(50);
-  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1 ===");
+  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2 ===");
 
   alarmOutput.begin();
+  if (audioPlayer.initialize() != ErrorCode::OK) {
+    Logger::warn("Audio no disponible; el sistema sigue (boton/LED/log/REST igual operan)");
+  }
 
   eventQueue = xQueueCreate(Config::CTRL_QUEUE_LEN, sizeof(EventType));
   if (eventQueue == nullptr) {
@@ -100,7 +109,7 @@ void setup() {
   pinMode(Config::PIN_BTN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(Config::PIN_BTN), buttonISR, FALLING);
 
-  Logger::info("Sistema ARMADO. Pulsa el boton o envia 'p'=panico / 's'=silenciar.");
+  Logger::info("Sistema ARMADO. Teclas: p=panico m=SMS r=REST s=silenciar.");
 
   // Tareas al final: hasta aquí el único escritor del Serial fue setup().
   // WiFi/BT irán en el core 0; la lógica en el core 1 (recomendación de la skill).

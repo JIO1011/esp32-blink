@@ -11,6 +11,9 @@
 include/secrets.h
 src/secrets.h
 
+# Claude Code: ajustes locales por máquina (no compartir; settings.json sí se versiona)
+.claude/settings.local.json
+
 # Binarios compilados
 *.bin
 *.elf

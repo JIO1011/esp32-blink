@@ -1,11 +1,24 @@
 #include "AlarmController.h"
+#include "Config.h"
 #include "Logger.h"
 
-AlarmController::AlarmController(IAlarmOutput& output) : output_(output) {}
+AlarmController::AlarmController(IAlarmOutput& output, IAudioPlayer& audio)
+  : output_(output), audio_(audio) {}
 
 bool AlarmController::isTrigger(EventType ev) {
   return ev == EventType::BTN_PANIC || ev == EventType::SMS_IN ||
          ev == EventType::REST_IN   || ev == EventType::RF433;
+}
+
+// Mapa evento -> pista (carpeta /mp3 del DFPlayer). En Fase 2 el "tipo de alarma"
+// se deriva de la FUENTE (placeholder para demostrar "audio por tipo" y ">=2 audios").
+// En Fase 4 el tipo vendrá del TEXTO del SMS y en Fase 6 del cuerpo de la petición REST.
+uint16_t AlarmController::trackFor(EventType ev) {
+  switch (ev) {
+    case EventType::SMS_IN:  return Config::TRACK_SUSPICIOUS;
+    case EventType::REST_IN: return Config::TRACK_DETERRENT;
+    default:                 return Config::TRACK_PANIC;   // BTN_PANIC, RF433
+  }
 }
 
 void AlarmController::onEvent(EventType ev) {
@@ -27,14 +40,17 @@ void AlarmController::onEvent(EventType ev) {
 }
 
 void AlarmController::trigger(EventType ev) {
-  // Fases 2-4 sumarán aquí: audio.play(trackFor(ev)), gsm.sendSms(...), storage.logEvent(...).
+  // Fases 3-4 sumarán aquí: storage.logEvent(...) y gsm.sendSms(...).
+  const uint16_t track = trackFor(ev);
   output_.activate();
+  audio_.play(track);
   state_.store(AlarmState::TRIGGERED, std::memory_order_relaxed);
-  Logger::info("ALARMA ACTIVADA (origen=%s) -> TRIGGERED", nameOf(ev));
+  Logger::info("ALARMA ACTIVADA (origen=%s, pista=%u) -> TRIGGERED", nameOf(ev), track);
 }
 
 void AlarmController::silence() {
   output_.deactivate();
+  audio_.stop();
   state_.store(AlarmState::SILENCED, std::memory_order_relaxed);
   Logger::info("Alarma silenciada -> SILENCED");
 }
