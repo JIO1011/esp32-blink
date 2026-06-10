@@ -44,6 +44,19 @@ ErrorCode SdStorage::logEvent(EventType origin, AlarmState state) {
   return rc;
 }
 
+String SdStorage::readLog(size_t maxBytes) {
+  String out;
+  if (!ready_) return out;
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(300)) != pdTRUE) return out;
+  File f = SD.open(path_, FILE_READ);
+  if (f) {
+    while (f.available() && out.length() < maxBytes) out += static_cast<char>(f.read());
+    f.close();
+  }
+  xSemaphoreGive(mutex_);
+  return out;
+}
+
 void SdStorage::printLog() {
   if (!ready_) return;
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(300)) != pdTRUE) return;

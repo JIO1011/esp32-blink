@@ -19,6 +19,7 @@
 #include "SmsCommand.h"
 #include "ConfigStore.h"
 #include "NetPortal.h"
+#include "RestApi.h"
 #include "AlarmController.h"
 
 // --- Composición e inyección de dependencias ---
@@ -32,9 +33,14 @@ static Sim800Driver    gsm(Serial2, Config::PIN_SIM_RX, Config::PIN_SIM_TX,     
                            Config::GSM_BAUD);
 static AlarmController controller(alarmOutput, audioPlayer, storage);                   // recibe interfaces
 static ConfigStore     configStore;                                                     // config persistente (NVS)
-static NetPortal       netPortal(configStore, Config::AP_SSID, Config::AP_PASS);        // WiFi AP+STA + portal
+static WebServer       webServer(80);                                                   // HTTP compartido (portal + REST)
+static NetPortal       netPortal(configStore, Config::AP_SSID, Config::AP_PASS, webServer);
 
 static QueueHandle_t eventQueue = nullptr;   // bus de eventos del sistema
+
+// API REST: cada operación entrante se publica como evento en la MISMA cola del sistema.
+static RestApi         restApi(webServer, controller, storage,
+                               [](EventType ev) { if (eventQueue) xQueueSend(eventQueue, &ev, 0); });
 
 // --- ISR del botón de pánico (Fase 1) ---
 // Mínima (criterio "Siempre"): sólo encola el evento, sin Serial/delay/malloc.
@@ -130,9 +136,10 @@ static void TaskGsm(void*) {
 // --- TaskNet: WiFi Station + SoftAP y portal de configuración (Fase 5) ---
 // Va en el core 0 (donde corre el stack WiFi/BT del ESP32).
 static void TaskNet(void*) {
-  netPortal.begin();
+  netPortal.begin();          // WiFi AP+STA + rutas del portal + server.begin()
+  restApi.registerRoutes();   // monta /api/* en el MISMO WebServer
   for (;;) {
-    netPortal.handle();
+    netPortal.handle();       // webServer.handleClient()
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -141,7 +148,7 @@ void setup() {
   Serial.begin(Config::LOG_BAUD);
   Logger::begin();          // mutex de Serial ANTES de cualquier log concurrente
   delay(50);
-  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2/3/4/5 ===");
+  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2/3/4/5/6 ===");
 
   configStore.begin();      // NVS: credenciales/parametros persistentes
 

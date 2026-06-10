@@ -2,8 +2,8 @@
 #include "NetPortal.h"
 #include "Logger.h"
 
-NetPortal::NetPortal(ConfigStore& cfg, const char* apSsid, const char* apPass)
-  : cfg_(cfg), apSsid_(apSsid), apPass_(apPass) {}
+NetPortal::NetPortal(ConfigStore& cfg, const char* apSsid, const char* apPass, WebServer& server)
+  : cfg_(cfg), apSsid_(apSsid), apPass_(apPass), server_(server) {}
 
 void NetPortal::begin() {
   WiFi.mode(WIFI_AP_STA);                 // SoftAP + Station simultáneos

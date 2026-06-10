@@ -18,7 +18,8 @@ public:
 
   ErrorCode initialize() override;
   ErrorCode logEvent(EventType origin, AlarmState state) override;
-  void printLog();   // vuelca el log por Serial (demo: llamar en setup, hilo único)
+  void   printLog();                       // vuelca el log por Serial (demo: llamar en setup, hilo único)
+  String readLog(size_t maxBytes = 4096);  // devuelve el CSV (para la API REST), bajo mutex
 
 private:
   uint8_t  csPin_;
