@@ -15,6 +15,7 @@ Two project skills are installed in `.claude/skills/`:
 
 - **[instrucciones.md](instrucciones.md)** — 10-phase firmware roadmap (Fase 0–9), each with objective, ANEXO 1 requirements covered (with source), firmware work, hardware needed, and done criteria. Phases 0–6 cover the minimum demo; 7–9 complete ANEXO 1 compliance on the ESP32 side.
 - **[requerimientos-modulos.md](requerimientos-modulos.md)** — Bill of materials for missing modules. Bloque A (demo) + B1 (LAN W5500), plus Producción rows (P1–P5) for items outside the prototype scope (homologated GSM, AC supply, power stage, enclosure, RTC).
+- **[guia-modulos.md](guia-modulos.md)** — Quick reference per module (DFPlayer/MP3, MicroSD, SIM800L, WiFi+portal): commands, related files, and where to edit to add/remove things.
 
 ## Toolchain
 

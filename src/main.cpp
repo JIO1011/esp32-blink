@@ -17,6 +17,8 @@
 #include "SdStorage.h"
 #include "Sim800Driver.h"
 #include "SmsCommand.h"
+#include "ConfigStore.h"
+#include "NetPortal.h"
 #include "AlarmController.h"
 
 // --- Composición e inyección de dependencias ---
@@ -29,6 +31,8 @@ static SdStorage       storage(Config::PIN_SD_CS, Config::PIN_SD_SCK,           
 static Sim800Driver    gsm(Serial2, Config::PIN_SIM_RX, Config::PIN_SIM_TX,             // SIM800L en UART2 (9600)
                            Config::GSM_BAUD);
 static AlarmController controller(alarmOutput, audioPlayer, storage);                   // recibe interfaces
+static ConfigStore     configStore;                                                     // config persistente (NVS)
+static NetPortal       netPortal(configStore, Config::AP_SSID, Config::AP_PASS);        // WiFi AP+STA + portal
 
 static QueueHandle_t eventQueue = nullptr;   // bus de eventos del sistema
 
@@ -106,7 +110,8 @@ static void TaskGsm(void*) {
   std::string from, body;
   for (;;) {
     if (gsm.pollIncoming(from, body)) {
-      if (!SmsCommand::isAllowedSender(from, Config::SMS_ALLOWLIST)) {
+      const std::string allow = configStore.smsAllowList(Config::SMS_ALLOWLIST).c_str();
+      if (!SmsCommand::isAllowedSender(from, allow)) {
         Logger::warn("SMS de %s IGNORADO (no autorizado)", from.c_str());
       } else {
         EventType ev;
@@ -122,11 +127,23 @@ static void TaskGsm(void*) {
   }
 }
 
+// --- TaskNet: WiFi Station + SoftAP y portal de configuración (Fase 5) ---
+// Va en el core 0 (donde corre el stack WiFi/BT del ESP32).
+static void TaskNet(void*) {
+  netPortal.begin();
+  for (;;) {
+    netPortal.handle();
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
 void setup() {
   Serial.begin(Config::LOG_BAUD);
   Logger::begin();          // mutex de Serial ANTES de cualquier log concurrente
   delay(50);
-  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2/3/4 ===");
+  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2/3/4/5 ===");
+
+  configStore.begin();      // NVS: credenciales/parametros persistentes
 
   alarmOutput.begin();
   if (audioPlayer.initialize() != ErrorCode::OK) {
@@ -156,6 +173,7 @@ void setup() {
   xTaskCreatePinnedToCore(TaskStatusLed,     "led",     2048, nullptr, 1, nullptr, 1);
   xTaskCreatePinnedToCore(TaskSerialConsole, "console", 2048, nullptr, 1, nullptr, 1);
   xTaskCreatePinnedToCore(TaskGsm,           "gsm",     4096, nullptr, 1, nullptr, 1);
+  xTaskCreatePinnedToCore(TaskNet,           "net",     8192, nullptr, 1, nullptr, 0);  // WiFi/portal en core 0
 }
 
 void loop() {

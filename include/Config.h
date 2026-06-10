@@ -42,8 +42,12 @@ namespace Config {
   constexpr char LOG_EVENTS_PATH[] = "/eventos.csv";   // log en la MicroSD del ESP32 (VSPI)
 
   // --- SIM800L / SMS (Fase 4) ---
-  // Remitentes autorizados para activar por SMS (formato internacional, separados por comas).
-  // Demo: aquí. Producción/Fase 5: configurar por SoftAP/NVS y/o mover a secrets.h fuera de git.
+  // Allow-list POR DEFECTO de remitentes (formato internacional, separados por comas).
+  // En Fase 5 se puede sobrescribir por el portal (NVS), sin recompilar. No commitear números reales.
   constexpr char SMS_ALLOWLIST[] = "+593991234567,+593988888888";
+
+  // --- WiFi / portal de configuración (Fase 5) ---
+  constexpr char AP_SSID[] = "AlarmaComunitaria-Config";   // SoftAP del portal
+  constexpr char AP_PASS[] = "alarma1234";                 // clave del SoftAP (>=8 chars)
 
 } // namespace Config
