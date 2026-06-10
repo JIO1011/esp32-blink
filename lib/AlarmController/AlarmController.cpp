@@ -2,8 +2,8 @@
 #include "Config.h"
 #include "Logger.h"
 
-AlarmController::AlarmController(IAlarmOutput& output, IAudioPlayer& audio)
-  : output_(output), audio_(audio) {}
+AlarmController::AlarmController(IAlarmOutput& output, IAudioPlayer& audio, IStorage& storage)
+  : output_(output), audio_(audio), storage_(storage) {}
 
 bool AlarmController::isTrigger(EventType ev) {
   return ev == EventType::BTN_PANIC || ev == EventType::SMS_IN ||
@@ -40,10 +40,10 @@ void AlarmController::onEvent(EventType ev) {
 }
 
 void AlarmController::trigger(EventType ev) {
-  // Fases 3-4 sumarán aquí: storage.logEvent(...) y gsm.sendSms(...).
   const uint16_t track = trackFor(ev);
   output_.activate();
   audio_.play(track);
+  storage_.logEvent(ev, AlarmState::TRIGGERED);   // auditoría local (MicroSD)
   state_.store(AlarmState::TRIGGERED, std::memory_order_relaxed);
   Logger::info("ALARMA ACTIVADA (origen=%s, pista=%u) -> TRIGGERED", nameOf(ev), track);
 }
@@ -51,6 +51,7 @@ void AlarmController::trigger(EventType ev) {
 void AlarmController::silence() {
   output_.deactivate();
   audio_.stop();
+  storage_.logEvent(EventType::SILENCE, AlarmState::SILENCED);
   state_.store(AlarmState::SILENCED, std::memory_order_relaxed);
   Logger::info("Alarma silenciada -> SILENCED");
 }

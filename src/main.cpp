@@ -2,6 +2,7 @@
 // Fase 0: esqueleto arquitectónico (Config, capas en lib/, logger, máquina de estados).
 // Fase 1: botón de pánico por ISR -> cola -> AlarmController; LED de estado; GPIO de disparo.
 // Fase 2: audio por tipo de evento (DFPlayer Mini) inyectado en el controlador.
+// Fase 3: log de eventos en MicroSD (VSPI) con mutex.
 //
 // main.cpp es SÓLO composición: crea instancias, las inyecta y lanza las tareas.
 #include <Arduino.h>
@@ -11,13 +12,17 @@
 #include "Logger.h"
 #include "GpioAlarmOutput.h"
 #include "Mp3Player.h"
+#include "SdStorage.h"
 #include "AlarmController.h"
 
 // --- Composición e inyección de dependencias ---
 static GpioAlarmOutput alarmOutput(Config::PIN_RELAY);                                  // salida concreta (HAL)
 static Mp3Player       audioPlayer(Serial1, Config::PIN_MP3_RX, Config::PIN_MP3_TX,     // DFPlayer en UART1 (9600)
                                    Config::MP3_BAUD);
-static AlarmController controller(alarmOutput, audioPlayer);                            // recibe interfaces
+static SdStorage       storage(Config::PIN_SD_CS, Config::PIN_SD_SCK,                   // MicroSD por VSPI
+                               Config::PIN_SD_MISO, Config::PIN_SD_MOSI,
+                               Config::LOG_EVENTS_PATH);
+static AlarmController controller(alarmOutput, audioPlayer, storage);                   // recibe interfaces
 
 static QueueHandle_t eventQueue = nullptr;   // bus de eventos del sistema
 
@@ -31,7 +36,7 @@ void IRAM_ATTR buttonISR() {
   if (hpw) portYIELD_FROM_ISR();
 }
 
-// --- TaskController: único consumidor de la cola y único escritor del log ---
+// --- TaskController: único consumidor de la cola y único escritor del log Serial ---
 static void TaskController(void*) {
   EventType ev;
   uint32_t lastBtnMs = 0;
@@ -92,11 +97,16 @@ static void TaskSerialConsole(void*) {
 void setup() {
   Serial.begin(Config::LOG_BAUD);
   delay(50);
-  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2 ===");
+  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2/3 ===");
 
   alarmOutput.begin();
   if (audioPlayer.initialize() != ErrorCode::OK) {
     Logger::warn("Audio no disponible; el sistema sigue (boton/LED/log/REST igual operan)");
+  }
+  if (storage.initialize() != ErrorCode::OK) {
+    Logger::warn("MicroSD no disponible; el sistema sigue sin registrar eventos");
+  } else {
+    storage.printLog();   // muestra el log persistido (demuestra continuidad tras reinicio)
   }
 
   eventQueue = xQueueCreate(Config::CTRL_QUEUE_LEN, sizeof(EventType));

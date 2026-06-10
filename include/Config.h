@@ -12,7 +12,10 @@ namespace Config {
   constexpr uint8_t PIN_SIM_RST  = 33;  // Reset SIM800L (opcional)           (Fase 4)
   constexpr uint8_t PIN_MP3_RX   = 16;  // DFPlayer TX -> ESP32 RX            (Fase 2)
   constexpr uint8_t PIN_MP3_TX   = 17;  // ESP32 TX    -> DFPlayer RX (1 kΩ)  (Fase 2)
-  constexpr uint8_t PIN_SD_CS    = 5;   // MicroSD CS (VSPI 18/19/23)         (Fase 3)
+  constexpr uint8_t PIN_SD_SCK   = 18;  // MicroSD VSPI SCK                    (Fase 3)
+  constexpr uint8_t PIN_SD_MISO  = 19;  // MicroSD VSPI MISO                   (Fase 3)
+  constexpr uint8_t PIN_SD_MOSI  = 23;  // MicroSD VSPI MOSI                   (Fase 3)
+  constexpr uint8_t PIN_SD_CS    = 5;   // MicroSD VSPI CS                     (Fase 3)
   constexpr uint8_t PIN_W5500_CS = 4;   // LAN W5500 CS (VSPI compartido)     (Fase 8)
 
   // --- E/S de la Fase 1 ---
@@ -34,5 +37,8 @@ namespace Config {
   constexpr uint16_t TRACK_PANIC      = 1;
   constexpr uint16_t TRACK_SUSPICIOUS = 2;
   constexpr uint16_t TRACK_DETERRENT  = 3;
+
+  // --- Almacenamiento (Fase 3) ---
+  constexpr char LOG_EVENTS_PATH[] = "/eventos.csv";   // log en la MicroSD del ESP32 (VSPI)
 
 } // namespace Config
