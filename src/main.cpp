@@ -3,9 +3,11 @@
 // Fase 1: botón de pánico por ISR -> cola -> AlarmController; LED de estado; GPIO de disparo.
 // Fase 2: audio por tipo de evento (DFPlayer Mini) inyectado en el controlador.
 // Fase 3: log de eventos en MicroSD (VSPI) con mutex.
+// Fase 4: activación por SMS (SIM800L) -> TaskGsm publica eventos en la misma cola.
 //
 // main.cpp es SÓLO composición: crea instancias, las inyecta y lanza las tareas.
 #include <Arduino.h>
+#include <string>
 
 #include "Config.h"
 #include "Events.h"
@@ -13,6 +15,8 @@
 #include "GpioAlarmOutput.h"
 #include "Mp3Player.h"
 #include "SdStorage.h"
+#include "Sim800Driver.h"
+#include "SmsCommand.h"
 #include "AlarmController.h"
 
 // --- Composición e inyección de dependencias ---
@@ -22,13 +26,14 @@ static Mp3Player       audioPlayer(Serial1, Config::PIN_MP3_RX, Config::PIN_MP3_
 static SdStorage       storage(Config::PIN_SD_CS, Config::PIN_SD_SCK,                   // MicroSD por VSPI
                                Config::PIN_SD_MISO, Config::PIN_SD_MOSI,
                                Config::LOG_EVENTS_PATH);
+static Sim800Driver    gsm(Serial2, Config::PIN_SIM_RX, Config::PIN_SIM_TX,             // SIM800L en UART2 (9600)
+                           Config::GSM_BAUD);
 static AlarmController controller(alarmOutput, audioPlayer, storage);                   // recibe interfaces
 
 static QueueHandle_t eventQueue = nullptr;   // bus de eventos del sistema
 
 // --- ISR del botón de pánico (Fase 1) ---
 // Mínima (criterio "Siempre"): sólo encola el evento, sin Serial/delay/malloc.
-// El antirrebote vive en TaskController, no aquí.
 void IRAM_ATTR buttonISR() {
   const EventType ev = EventType::BTN_PANIC;
   BaseType_t hpw = pdFALSE;
@@ -36,14 +41,13 @@ void IRAM_ATTR buttonISR() {
   if (hpw) portYIELD_FROM_ISR();
 }
 
-// --- TaskController: único consumidor de la cola y único escritor del log Serial ---
+// --- TaskController: consume la cola y aplica la máquina de estados ---
 static void TaskController(void*) {
   EventType ev;
   uint32_t lastBtnMs = 0;
   for (;;) {
     if (xQueueReceive(eventQueue, &ev, portMAX_DELAY) == pdTRUE) {
-      // Antirrebote por software del pulsador (marca de tiempo en la tarea).
-      if (ev == EventType::BTN_PANIC) {
+      if (ev == EventType::BTN_PANIC) {              // antirrebote por software (en la tarea)
         const uint32_t now = millis();
         if (now - lastBtnMs < Config::BTN_DEBOUNCE_MS) continue;
         lastBtnMs = now;
@@ -53,17 +57,16 @@ static void TaskController(void*) {
   }
 }
 
-// --- TaskStatusLed: refleja el estado en el LED (latido en ARMED/SILENCED, fijo en TRIGGERED) ---
-// Único escritor de PIN_LED; lee el estado atómico del controlador.
+// --- TaskStatusLed: latido en ARMED/SILENCED, fijo en TRIGGERED ---
 static void TaskStatusLed(void*) {
   pinMode(Config::PIN_LED, OUTPUT);
   bool on = false;
   for (;;) {
     if (controller.state() == AlarmState::TRIGGERED) {
-      digitalWrite(Config::PIN_LED, HIGH);              // encendido fijo
+      digitalWrite(Config::PIN_LED, HIGH);
       vTaskDelay(pdMS_TO_TICKS(100));
     } else {
-      on = !on;                                         // latido
+      on = !on;
       digitalWrite(Config::PIN_LED, on ? HIGH : LOW);
       vTaskDelay(pdMS_TO_TICKS(Config::LED_BLINK_ARMED_MS));
     }
@@ -72,8 +75,6 @@ static void TaskStatusLed(void*) {
 
 // --- TaskSerialConsole: inyección manual de eventos para la demo (sin hardware extra) ---
 // p = pánico (BTN),  m = simula SMS,  r = simula REST,  s = silenciar,  a = ack.
-// 'm' y 'r' permiten oír pistas DISTINTAS y demostrar "audio por tipo" / ">=2 audios"
-// antes de tener las fuentes reales (SMS en Fase 4, REST en Fase 6). Único LECTOR del Serial.
 static void TaskSerialConsole(void*) {
   for (;;) {
     if (Serial.available()) {
@@ -94,10 +95,38 @@ static void TaskSerialConsole(void*) {
   }
 }
 
+// --- TaskGsm: SIM800L. Recibe SMS, valida remitente y publica el evento en la cola ---
+// Único accesor de la UART2 -> no necesita mutex propio (a diferencia del log Serial).
+static void TaskGsm(void*) {
+  if (gsm.initialize() != ErrorCode::OK) {
+    Logger::warn("SIM800L no disponible; sin activacion por SMS (boton/REST igual operan)");
+    vTaskDelete(nullptr);
+    return;
+  }
+  std::string from, body;
+  for (;;) {
+    if (gsm.pollIncoming(from, body)) {
+      if (!SmsCommand::isAllowedSender(from, Config::SMS_ALLOWLIST)) {
+        Logger::warn("SMS de %s IGNORADO (no autorizado)", from.c_str());
+      } else {
+        EventType ev;
+        if (SmsCommand::toEvent(body, ev)) {
+          Logger::info("SMS de %s autorizado -> %s", from.c_str(), nameOf(ev));
+          xQueueSend(eventQueue, &ev, 0);
+        } else {
+          Logger::warn("SMS de %s sin orden reconocida: '%s'", from.c_str(), body.c_str());
+        }
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
 void setup() {
   Serial.begin(Config::LOG_BAUD);
+  Logger::begin();          // mutex de Serial ANTES de cualquier log concurrente
   delay(50);
-  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2/3 ===");
+  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2/3/4 ===");
 
   alarmOutput.begin();
   if (audioPlayer.initialize() != ErrorCode::OK) {
@@ -106,7 +135,7 @@ void setup() {
   if (storage.initialize() != ErrorCode::OK) {
     Logger::warn("MicroSD no disponible; el sistema sigue sin registrar eventos");
   } else {
-    storage.printLog();   // muestra el log persistido (demuestra continuidad tras reinicio)
+    storage.printLog();     // muestra el log persistido (continuidad tras reinicio)
   }
 
   eventQueue = xQueueCreate(Config::CTRL_QUEUE_LEN, sizeof(EventType));
@@ -121,11 +150,12 @@ void setup() {
 
   Logger::info("Sistema ARMADO. Teclas: p=panico m=SMS r=REST s=silenciar.");
 
-  // Tareas al final: hasta aquí el único escritor del Serial fue setup().
+  // El log Serial ya es thread-safe (Logger::begin), así que las tareas pueden loguear en paralelo.
   // WiFi/BT irán en el core 0; la lógica en el core 1 (recomendación de la skill).
   xTaskCreatePinnedToCore(TaskController,    "ctrl",    4096, nullptr, 2, nullptr, 1);
   xTaskCreatePinnedToCore(TaskStatusLed,     "led",     2048, nullptr, 1, nullptr, 1);
   xTaskCreatePinnedToCore(TaskSerialConsole, "console", 2048, nullptr, 1, nullptr, 1);
+  xTaskCreatePinnedToCore(TaskGsm,           "gsm",     4096, nullptr, 1, nullptr, 1);
 }
 
 void loop() {

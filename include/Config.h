@@ -41,4 +41,9 @@ namespace Config {
   // --- Almacenamiento (Fase 3) ---
   constexpr char LOG_EVENTS_PATH[] = "/eventos.csv";   // log en la MicroSD del ESP32 (VSPI)
 
+  // --- SIM800L / SMS (Fase 4) ---
+  // Remitentes autorizados para activar por SMS (formato internacional, separados por comas).
+  // Demo: aquí. Producción/Fase 5: configurar por SoftAP/NVS y/o mover a secrets.h fuera de git.
+  constexpr char SMS_ALLOWLIST[] = "+593991234567,+593988888888";
+
 } // namespace Config
