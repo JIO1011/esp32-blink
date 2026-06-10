@@ -37,6 +37,26 @@ Referencia de uso y **conexiones** por módulo. HW detallado → skill `alarmas-
 
 ---
 
+## 🔧 Recetas — ¿dónde cambio…?
+
+| Quiero… | Archivo / lugar | Qué editar |
+|:---|:---|:---|
+| **Números autorizados (lista blanca SMS)** | **Portal** (recomendado) **o** [include/Config.h](include/Config.h) | En `http://192.168.4.1/` campo *Numeros…* (persiste en NVS). En código: `SMS_ALLOWLIST` (separados por coma) |
+| **Abrir el portal `192.168.4.1`** | _(teléfono/PC)_ | Conéctate al WiFi **`AlarmaComunitaria-Config`** (clave `alarma1234`) → navegador → `http://192.168.4.1/` |
+| **Clave/nombre del SoftAP de config** | [include/Config.h](include/Config.h) | `AP_PASS` (≥8 chars) y `AP_SSID` |
+| **Conectar a tu WiFi de casa** | **Portal** | en `192.168.4.1`, SSID + clave (persiste, no se recompila) |
+| **Letras de la consola (`p`,`s`,`m`,`r`,`a`)** | [src/main.cpp](src/main.cpp) | función `TaskSerialConsole` → el `switch (c)` |
+| **Agregar/cambiar un audio** | SD del DFPlayer + [include/Config.h](include/Config.h) + [AlarmController.cpp](lib/AlarmController/AlarmController.cpp) | copia `/mp3/000N.mp3` + define `TRACK_X` + mapea en `trackFor()` |
+| **Volumen del audio** | [include/Config.h](include/Config.h) | `MP3_VOLUME` (0–30) |
+| **Palabras clave del SMS** (PANICO, SILENCIAR…) | [lib/Common/SmsCommand.cpp](lib/Common/SmsCommand.cpp) | función `toEvent()` |
+| **Webhook / APN** (notificación Fase 7) | [include/Config.h](include/Config.h) | `WEBHOOK_URL`, `GSM_APN` |
+| **Ruta del archivo de log** | [include/Config.h](include/Config.h) | `LOG_EVENTS_PATH` |
+| **Cualquier pin** | [include/Config.h](include/Config.h) | `PIN_*` |
+
+> 🧭 Regla: **casi todo se cambia en [include/Config.h](include/Config.h)** (fuente única). Lo que cambia en caliente (WiFi, lista blanca) va por el **portal**.
+
+---
+
 ## 🔊 MP3 — DFPlayer Mini · _audio por tipo de evento (Fase 2)_
 
 🔌 **Conexiones**
@@ -106,5 +126,6 @@ curl -X POST http://<ip>/api/alarma?tipo=panico   # dispara (tipo: panico|sospec
 curl -X POST http://<ip>/api/silenciar            # silencia
 curl http://<ip>/api/eventos                      # log CSV de la MicroSD
 ```
-📁 **Archivos:** [lib/NetPortal/](lib/NetPortal/) · [lib/ConfigStore/](lib/ConfigStore/) · [lib/RestApi/](lib/RestApi/) · `Config.h` (`AP_SSID`,`AP_PASS`)
-✏️ **Editar:** SSID/clave del portal → `AP_SSID`/`AP_PASS` · campos del formulario → `NetPortal::handleRoot/handleSave` · endpoints → `RestApi::registerRoutes()`
+🔔 **Notificación saliente (Fase 7):** en cada evento, el equipo hace un **POST JSON** a `WEBHOOK_URL` por **WiFi** si hay (testeable ya) o por **GPRS** (SIM800L) si solo hay 2G.
+📁 **Archivos:** [lib/NetPortal/](lib/NetPortal/) · [lib/ConfigStore/](lib/ConfigStore/) · [lib/RestApi/](lib/RestApi/) · `TaskGsm` en [src/main.cpp](src/main.cpp) (POST) · `Config.h` (`AP_*`,`WEBHOOK_URL`,`GSM_APN`)
+✏️ **Editar:** SSID/clave del portal → `AP_SSID`/`AP_PASS` · campos del formulario → `NetPortal::handleRoot/handleSave` · endpoints → `RestApi::registerRoutes()` · webhook → `WEBHOOK_URL`

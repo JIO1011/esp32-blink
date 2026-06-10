@@ -11,18 +11,20 @@
 // ESP32 TX(27) -> SIM RX vía divisor (~2.8 V); SIM TX -> ESP32 RX(26) directo.
 class Sim800Driver : public IGsm {
 public:
-  Sim800Driver(HardwareSerial& uart, int8_t rxPin, int8_t txPin, uint32_t baud);
+  Sim800Driver(HardwareSerial& uart, int8_t rxPin, int8_t txPin, uint32_t baud, const char* apn);
 
   ErrorCode initialize() override;
   bool      pollIncoming(std::string& from, std::string& body) override;
   ErrorCode sendSms(const std::string& to, const std::string& body) override;
+  ErrorCode httpPostJson(const std::string& url, const std::string& json) override;
 
 private:
   bool sendAt(const char* cmd, const char* expect, uint32_t timeoutMs);
 
   HardwareSerial& uart_;
-  int8_t   rxPin_;
-  int8_t   txPin_;
-  uint32_t baud_;
-  bool     ready_ = false;
+  int8_t      rxPin_;
+  int8_t      txPin_;
+  uint32_t    baud_;
+  const char* apn_;
+  bool        ready_ = false;
 };

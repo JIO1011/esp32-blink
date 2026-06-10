@@ -4,8 +4,8 @@
 #include "SmsCommand.h"
 #include "Logger.h"
 
-Sim800Driver::Sim800Driver(HardwareSerial& uart, int8_t rxPin, int8_t txPin, uint32_t baud)
-  : uart_(uart), rxPin_(rxPin), txPin_(txPin), baud_(baud) {}
+Sim800Driver::Sim800Driver(HardwareSerial& uart, int8_t rxPin, int8_t txPin, uint32_t baud, const char* apn)
+  : uart_(uart), rxPin_(rxPin), txPin_(txPin), baud_(baud), apn_(apn) {}
 
 bool Sim800Driver::sendAt(const char* cmd, const char* expect, uint32_t timeoutMs) {
   while (uart_.available()) uart_.read();          // limpia residuos
@@ -64,6 +64,33 @@ ErrorCode Sim800Driver::sendSms(const std::string& to, const std::string& body) 
   uart_.print(body.c_str());
   uart_.write(26);                                 // Ctrl-Z: enviar
   return sendAt("", "OK", 8000) ? ErrorCode::OK : ErrorCode::GSM_ERROR;
+}
+
+ErrorCode Sim800Driver::httpPostJson(const std::string& url, const std::string& json) {
+  if (!ready_) return ErrorCode::GSM_ERROR;
+  char buf[256];
+
+  // Abrir portadora GPRS con el APN de la operadora.
+  sendAt("AT+SAPBR=3,1,\"Contype\",\"GPRS\"", "OK", 2000);
+  snprintf(buf, sizeof(buf), "AT+SAPBR=3,1,\"APN\",\"%s\"", apn_);
+  sendAt(buf, "OK", 2000);
+  if (!sendAt("AT+SAPBR=1,1", "OK", 10000)) { Logger::warn("GPRS: no abrio portadora"); return ErrorCode::GSM_ERROR; }
+
+  // Petición HTTP POST.
+  sendAt("AT+HTTPINIT", "OK", 3000);
+  sendAt("AT+HTTPPARA=\"CID\",1", "OK", 2000);
+  snprintf(buf, sizeof(buf), "AT+HTTPPARA=\"URL\",\"%s\"", url.c_str());
+  sendAt(buf, "OK", 2000);
+  sendAt("AT+HTTPPARA=\"CONTENT\",\"application/json\"", "OK", 2000);
+  snprintf(buf, sizeof(buf), "AT+HTTPDATA=%u,10000", static_cast<unsigned>(json.size()));
+  sendAt(buf, "DOWNLOAD", 3000);
+  uart_.print(json.c_str());
+  delay(json.size() > 64 ? 250 : 120);
+  const bool ok = sendAt("AT+HTTPACTION=1", "+HTTPACTION: 1,2", 15000);   // espera código 2xx
+
+  sendAt("AT+HTTPTERM", "OK", 2000);
+  sendAt("AT+SAPBR=0,1", "OK", 5000);                                     // cerrar portadora
+  return ok ? ErrorCode::OK : ErrorCode::GSM_ERROR;
 }
 
 #endif // ARDUINO

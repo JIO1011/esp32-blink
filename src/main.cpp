@@ -8,6 +8,7 @@
 // main.cpp es SÓLO composición: crea instancias, las inyecta y lanza las tareas.
 #include <Arduino.h>
 #include <string>
+#include <HTTPClient.h>
 
 #include "Config.h"
 #include "Events.h"
@@ -25,18 +26,23 @@
 // --- Composición e inyección de dependencias ---
 static GpioAlarmOutput alarmOutput(Config::PIN_RELAY);                                  // salida concreta (HAL)
 static Mp3Player       audioPlayer(Serial1, Config::PIN_MP3_RX, Config::PIN_MP3_TX,     // DFPlayer en UART1 (9600)
-                                   Config::MP3_BAUD);
+                                   Config::MP3_BAUD, Config::MP3_VOLUME);
 static SdStorage       storage(Config::PIN_SD_CS, Config::PIN_SD_SCK,                   // MicroSD por VSPI
                                Config::PIN_SD_MISO, Config::PIN_SD_MOSI,
                                Config::LOG_EVENTS_PATH);
 static Sim800Driver    gsm(Serial2, Config::PIN_SIM_RX, Config::PIN_SIM_TX,             // SIM800L en UART2 (9600)
-                           Config::GSM_BAUD);
+                           Config::GSM_BAUD, Config::GSM_APN);
 static AlarmController controller(alarmOutput, audioPlayer, storage);                   // recibe interfaces
 static ConfigStore     configStore;                                                     // config persistente (NVS)
 static WebServer       webServer(80);                                                   // HTTP compartido (portal + REST)
 static NetPortal       netPortal(configStore, Config::AP_SSID, Config::AP_PASS, webServer);
 
 static QueueHandle_t eventQueue = nullptr;   // bus de eventos del sistema
+
+// Notificación saliente (Fase 7): TaskController la encola en cada transición real;
+// TaskGsm la envía por la red disponible (WiFi o GPRS) sin bloquear al controlador.
+struct Notification { EventType origin; AlarmState state; };
+static QueueHandle_t notifyQueue = nullptr;
 
 // API REST: cada operación entrante se publica como evento en la MISMA cola del sistema.
 static RestApi         restApi(webServer, controller, storage,
@@ -62,7 +68,13 @@ static void TaskController(void*) {
         if (now - lastBtnMs < Config::BTN_DEBOUNCE_MS) continue;
         lastBtnMs = now;
       }
+      const AlarmState before = controller.state();
       controller.onEvent(ev);
+      const AlarmState after = controller.state();
+      if (after != before && notifyQueue) {          // hubo transición -> notificar al exterior
+        Notification n{ev, after};
+        xQueueSend(notifyQueue, &n, 0);              // no bloquea: el POST vive en TaskGsm
+      }
     }
   }
 }
@@ -105,17 +117,40 @@ static void TaskSerialConsole(void*) {
   }
 }
 
-// --- TaskGsm: SIM800L. Recibe SMS, valida remitente y publica el evento en la cola ---
-// Único accesor de la UART2 -> no necesita mutex propio (a diferencia del log Serial).
+// POST JSON por WiFi (HTTPClient). Para HTTPS haría falta WiFiClientSecure (ver nota Fase 7).
+static bool postViaWifi(const char* url, const std::string& json) {
+  HTTPClient http;
+  if (!http.begin(url)) return false;
+  http.addHeader("Content-Type", "application/json");
+  const int code = http.POST(String(json.c_str()));
+  http.end();
+  return code >= 200 && code < 300;
+}
+
+// --- TaskGsm: única tarea que toca la UART2 (sin mutex). Hace dos cosas: ---
+//   1) Envía las notificaciones salientes (Fase 7) por la red disponible (WiFi o GPRS).
+//   2) Recibe SMS (Fase 4), valida remitente y publica el evento en la cola.
+// Si no hay SIM800L, NO muere: sigue notificando por WiFi (el SMS queda deshabilitado).
 static void TaskGsm(void*) {
-  if (gsm.initialize() != ErrorCode::OK) {
-    Logger::warn("SIM800L no disponible; sin activacion por SMS (boton/REST igual operan)");
-    vTaskDelete(nullptr);
-    return;
-  }
+  const bool gsmReady = (gsm.initialize() == ErrorCode::OK);
+  if (!gsmReady)
+    Logger::warn("SIM800L no disponible; SMS off (las notificaciones saldran por WiFi si hay)");
+
   std::string from, body;
+  Notification n;
   for (;;) {
-    if (gsm.pollIncoming(from, body)) {
+    // 1) Notificación saliente
+    if (notifyQueue && xQueueReceive(notifyQueue, &n, 0) == pdTRUE) {
+      const std::string json = std::string("{\"origen\":\"") + nameOf(n.origin) +
+                               "\",\"estado\":\"" + nameOf(n.state) + "\"}";
+      bool ok = false;
+      const char* via = "ninguna";
+      if (WiFi.status() == WL_CONNECTED) { via = "WiFi"; ok = postViaWifi(Config::WEBHOOK_URL, json); }
+      else if (gsmReady)                 { via = "GPRS"; ok = (gsm.httpPostJson(Config::WEBHOOK_URL, json) == ErrorCode::OK); }
+      Logger::info("Notificacion %s via %s: %s", ok ? "OK" : "FALLO", via, json.c_str());
+    }
+    // 2) SMS entrante (solo si hay módulo)
+    if (gsmReady && gsm.pollIncoming(from, body)) {
       const std::string allow = configStore.smsAllowList(Config::SMS_ALLOWLIST).c_str();
       if (!SmsCommand::isAllowedSender(from, allow)) {
         Logger::warn("SMS de %s IGNORADO (no autorizado)", from.c_str());
@@ -148,7 +183,7 @@ void setup() {
   Serial.begin(Config::LOG_BAUD);
   Logger::begin();          // mutex de Serial ANTES de cualquier log concurrente
   delay(50);
-  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2/3/4/5/6 ===");
+  Logger::info("=== Alarmas Comunitarias FW — Fase 0/1/2/3/4/5/6/7 ===");
 
   configStore.begin();      // NVS: credenciales/parametros persistentes
 
@@ -162,7 +197,8 @@ void setup() {
     storage.printLog();     // muestra el log persistido (continuidad tras reinicio)
   }
 
-  eventQueue = xQueueCreate(Config::CTRL_QUEUE_LEN, sizeof(EventType));
+  eventQueue  = xQueueCreate(Config::CTRL_QUEUE_LEN, sizeof(EventType));
+  notifyQueue = xQueueCreate(8, sizeof(Notification));
   if (eventQueue == nullptr) {
     Logger::error("No se pudo crear eventQueue; sistema detenido");
     return;

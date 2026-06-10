@@ -37,6 +37,7 @@ namespace Config {
   constexpr uint16_t TRACK_PANIC      = 1;
   constexpr uint16_t TRACK_SUSPICIOUS = 2;
   constexpr uint16_t TRACK_DETERRENT  = 3;
+  constexpr uint8_t  MP3_VOLUME       = 25;   // volumen del DFPlayer (0-30)
 
   // --- Almacenamiento (Fase 3) ---
   constexpr char LOG_EVENTS_PATH[] = "/eventos.csv";   // log en la MicroSD del ESP32 (VSPI)
@@ -49,5 +50,9 @@ namespace Config {
   // --- WiFi / portal de configuración (Fase 5) ---
   constexpr char AP_SSID[] = "AlarmaComunitaria-Config";   // SoftAP del portal
   constexpr char AP_PASS[] = "alarma1234";                 // clave del SoftAP (>=8 chars)
+
+  // --- GPRS / notificación saliente a webhook (Fase 7) ---
+  constexpr char GSM_APN[]     = "internet";                      // APN de la operadora (ajustar)
+  constexpr char WEBHOOK_URL[] = "http://httpbin.org/post";       // endpoint de prueba (ajustar; http, no https)
 
 } // namespace Config

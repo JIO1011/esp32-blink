@@ -20,6 +20,9 @@ public:
   // No bloqueante: devuelve false si no hay nada pendiente.
   virtual bool pollIncoming(std::string& from, std::string& body) = 0;
 
-  // Envía un SMS (notificación). Se usará a fondo en notificaciones/Fase 7.
+  // Envía un SMS (notificación).
   virtual ErrorCode sendSms(const std::string& to, const std::string& body) = 0;
+
+  // POST JSON por GPRS a un webhook (Fase 7). Bloqueante varios segundos -> vive en TaskGsm.
+  virtual ErrorCode httpPostJson(const std::string& url, const std::string& json) = 0;
 };
