@@ -60,7 +60,7 @@ void NetPortal::handleSave() {
     if (pass.isEmpty()) pass = cfg_.wifiPass();   // vacío = conservar la clave anterior
     cfg_.setWifi(ssid, pass);
   }
-  cfg_.setSmsAllowList(sms);
+  if (sms.length()) cfg_.setSmsAllowList(sms);    // vacío = conservar la lista (no obligatorio)
 
   server_.send(200, "text/html",
     "<p>Guardado. Reconectando WiFi...</p><a href='/'>Volver</a>");

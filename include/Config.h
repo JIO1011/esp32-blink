@@ -40,7 +40,8 @@ namespace Config {
   constexpr uint8_t  MP3_VOLUME       = 25;   // volumen del DFPlayer (0-30)
 
   // --- Almacenamiento (Fase 3) ---
-  constexpr char LOG_EVENTS_PATH[] = "/eventos.csv";   // log en la MicroSD del ESP32 (VSPI)
+  constexpr char     LOG_EVENTS_PATH[] = "/eventos.csv";  // log en la MicroSD del ESP32 (VSPI)
+  constexpr uint32_t SD_SPI_HZ         = 1000000;         // SPI lento (1 MHz): tolera cables largos/protoboard
 
   // --- SIM800L / SMS (Fase 4) ---
   // Allow-list POR DEFECTO de remitentes (formato internacional, separados por comas).

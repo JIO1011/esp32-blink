@@ -20,13 +20,18 @@ public:
   ErrorCode logEvent(EventType origin, AlarmState state) override;
   void   printLog();                       // vuelca el log por Serial (demo: llamar en setup, hilo único)
   String readLog(size_t maxBytes = 4096);  // devuelve el CSV (para la API REST), bajo mutex
+  void   maintain();                       // remontaje en 2.º plano (NO en la ruta de la alarma)
 
 private:
+  bool attemptMount();          // intenta montar la SD (varios reintentos, SPI lento)
+  void ensureMountedLocked();   // remontaje en caliente con backoff (llamar con el mutex tomado)
+
   uint8_t  csPin_;
   int8_t   sckPin_;
   int8_t   misoPin_;
   int8_t   mosiPin_;
   const char* path_;
   SemaphoreHandle_t mutex_ = nullptr;
-  bool ready_ = false;
+  bool     ready_ = false;
+  uint32_t lastMountMs_ = 0;
 };

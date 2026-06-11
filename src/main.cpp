@@ -173,9 +173,28 @@ static void TaskGsm(void*) {
 static void TaskNet(void*) {
   netPortal.begin();          // WiFi AP+STA + rutas del portal + server.begin()
   restApi.registerRoutes();   // monta /api/* en el MISMO WebServer
+  wl_status_t last = WL_NO_SHIELD;
   for (;;) {
     netPortal.handle();       // webServer.handleClient()
+    const wl_status_t now = WiFi.status();
+    if (now != last) {        // feedback de conexión: avisa cuando la STA conecta/cae
+      last = now;
+      if (now == WL_CONNECTED)
+        Logger::info("WiFi CONECTADO: IP %s, RSSI %d dBm", WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+      else if (now == WL_NO_SSID_AVAIL)
+        Logger::warn("WiFi: red no encontrada (¿SSID 2.4 GHz? el ESP32 no ve 5 GHz)");
+      else if (now == WL_CONNECT_FAILED)
+        Logger::warn("WiFi: fallo de conexion (clave incorrecta?)");
+    }
     vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+// --- TaskSdWatch: remonta la MicroSD en 2.º plano si se cae (fuera de la ruta de la alarma) ---
+static void TaskSdWatch(void*) {
+  for (;;) {
+    storage.maintain();
+    vTaskDelay(pdMS_TO_TICKS(2000));
   }
 }
 
@@ -217,6 +236,7 @@ void setup() {
   xTaskCreatePinnedToCore(TaskSerialConsole, "console", 2048, nullptr, 1, nullptr, 1);
   xTaskCreatePinnedToCore(TaskGsm,           "gsm",     4096, nullptr, 1, nullptr, 1);
   xTaskCreatePinnedToCore(TaskNet,           "net",     8192, nullptr, 1, nullptr, 0);  // WiFi/portal en core 0
+  xTaskCreatePinnedToCore(TaskSdWatch,       "sdwatch", 4096, nullptr, 1, nullptr, 1);  // remontaje SD en 2.º plano
 }
 
 void loop() {
